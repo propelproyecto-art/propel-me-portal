@@ -1,0 +1,25 @@
+# Credenciales locales — NUNCA subir a GitHub
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE / Sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Datos sensibles
+*.csv
+!RAW_baseline.csv.example
+!RAW_endline.csv.example
+
+# Outputs temporales
+tabla_maestra_*.csv
