@@ -427,6 +427,208 @@ with tab_calculo:
                 help="Configura aquí el dashboard conectado a Supabase"
             )
 
+        # ============================================================
+        # SECCIÓN DE VISUALIZACIONES (basadas en el PDF de Indicadores C8)
+        # ============================================================
+        st.divider()
+        st.subheader("📊 Visualizaciones para reporte")
+        st.caption(
+            "Gráficos sugeridos según el PDF de Indicadores Calculados de Propel. "
+            "Listos para incluir en reportes a donantes."
+        )
+
+        from visualizaciones import (
+            cards_sociodemografico, card_nps, donut_eficiencia,
+            bar_eficiencia_proyectada, pie_ai_adoption, stacked_net_ai_adoption,
+            pie_uso_google_ai, bar_ai_mindset, bars_tool_learning,
+            bars_tool_learning_pct, stacked_digital_maturity,
+            pie_community_building, donut_confianza,
+        )
+        import ast
+
+        # Helpers para extraer datos de la tabla maestra
+        def get_val(nombre_indicador, default=None):
+            r = tabla[tabla['indicador'] == nombre_indicador]
+            return r.iloc[0]['valor'] if not r.empty else default
+
+        def get_n(nombre_indicador, default=0):
+            r = tabla[tabla['indicador'] == nombre_indicador]
+            return r.iloc[0]['n'] if not r.empty else default
+
+        def get_detalle(nombre_indicador, default=''):
+            r = tabla[tabla['indicador'] == nombre_indicador]
+            return r.iloc[0]['detalle'] if not r.empty else default
+
+        def parse_dist(detalle):
+            """Parsea un detalle en formato dict-string o 'k:v|k:v' a dict."""
+            if not detalle: return {}
+            s = str(detalle).strip()
+            # Formato: {'MEJORÓ': 7, 'NO MEJORÓ': 14}
+            if s.startswith('{'):
+                try:
+                    return ast.literal_eval(s)
+                except (ValueError, SyntaxError):
+                    return {}
+            # Formato: clave:valor|clave:valor
+            d = {}
+            for part in s.split('|'):
+                if ':' in part:
+                    k, v = part.rsplit(':', 1)
+                    try:
+                        d[k.strip()] = int(v.strip())
+                    except ValueError:
+                        try:
+                            d[k.strip()] = float(v.strip())
+                        except ValueError:
+                            d[k.strip()] = v.strip()
+            return d
+
+        # === 1. Sociodemográfico ===
+        st.markdown("#### 1. Sociodemográfico")
+        n_part = int(get_n('NPS', 0))
+        n_orgs = int(get_n('% orgs aumentaron Net AI Adoption', 0))
+        cards_sociodemografico(n_part, n_orgs)
+
+        st.markdown("")
+
+        # === 2. NPS y Confianza ===
+        col_a, col_b = st.columns(2)
+        with col_a:
+            nps_val = get_val('NPS')
+            if nps_val is not None:
+                st.plotly_chart(card_nps(nps_val, get_n('NPS')),
+                                use_container_width=True)
+        with col_b:
+            conf_val = get_val('% participantes mayor confianza tecnología')
+            if conf_val is not None:
+                st.plotly_chart(
+                    donut_confianza(conf_val, get_n('% participantes mayor confianza tecnología')),
+                    use_container_width=True
+                )
+
+        # === 3. Eficiencia ===
+        st.markdown("#### 3. Eficiencia")
+        col_c, col_d = st.columns(2)
+        with col_c:
+            pct_mejor = get_val('% participantes mejoraron eficiencia')
+            prom_calc = get_val('Promedio horas ahorradas/semana (calculado pre-post)')
+            n_horas = int(get_n('% participantes mejoraron eficiencia'))
+            n_mejoraron = int(round((pct_mejor or 0) / 100 * n_horas)) if n_horas else 0
+            if pct_mejor is not None:
+                st.plotly_chart(
+                    donut_eficiencia(pct_mejor, n_mejoraron, n_horas, prom_calc or 0),
+                    use_container_width=True
+                )
+        with col_d:
+            prom_proy = get_val('Promedio horas ahorradas/semana (proyección endline)')
+            det_proy = parse_dist(get_detalle('Promedio horas ahorradas/semana (proyección endline)'))
+            n_1_2 = det_proy.get('1-2h', 0)
+            n_3_4 = det_proy.get('3-4h', 0)
+            n_5_plus = det_proy.get('5+h', 0)
+            if (n_1_2 + n_3_4 + n_5_plus) > 0:
+                fig = bar_eficiencia_proyectada(n_1_2, n_3_4, n_5_plus, prom_proy or 0)
+                if fig: st.plotly_chart(fig, use_container_width=True)
+
+        # === 4. AI Adoption Level ===
+        st.markdown("#### 4. AI Adoption Level (percibido al cierre)")
+        ai_levels = {}
+        for nivel in ['Estratégico', 'Integrado', 'Activo', 'Explorando', 'Nada']:
+            v = get_val(f'AI Adoption Level - {nivel}')
+            n_lvl = get_n(f'AI Adoption Level - {nivel}')
+            if v is not None and n_lvl:
+                ai_levels[nivel] = int(round(v / 100 * n_lvl))
+        if ai_levels:
+            st.plotly_chart(pie_ai_adoption(ai_levels), use_container_width=True)
+        else:
+            st.info("AI Adoption Level no disponible para esta cohorte.")
+
+        # === 5. Net AI Adoption (cambio) ===
+        st.markdown("#### 5. Net AI Adoption · Cambio organización")
+        estados_ai = parse_dist(get_detalle('% orgs aumentaron Net AI Adoption'))
+        if estados_ai:
+            fig = stacked_net_ai_adoption(
+                estados_ai.get('MEJORÓ', 0),
+                estados_ai.get('MANTUVO MÁXIMO', 0),
+                estados_ai.get('BAJÓ', 0),
+                estados_ai.get('NO MEJORÓ', 0),
+            )
+            if fig: st.plotly_chart(fig, use_container_width=True)
+
+        # === 6. Uso Google AI ===
+        st.markdown("#### 6. Uso de herramientas Google AI")
+        google_dist = parse_dist(get_detalle('% participantes uso diario Google AI'))
+        if google_dist and not all(isinstance(v, str) for v in google_dist.values()):
+            st.plotly_chart(pie_uso_google_ai(google_dist), use_container_width=True)
+        else:
+            v_diario = get_val('% participantes uso diario Google AI')
+            if v_diario is not None:
+                st.metric('% uso diario Google AI', f'{v_diario}%',
+                          delta=f'n={get_n("% participantes uso diario Google AI")}')
+
+        # === 7. AI Mindset Index ===
+        st.markdown("#### 7. AI Mindset Index")
+        mindset_dist = parse_dist(get_detalle('% participantes con AI Mindset alto'))
+        # Filtrar a solo claves numéricas
+        mindset_numeric = {}
+        for k, v in mindset_dist.items():
+            try:
+                mindset_numeric[float(k)] = int(v)
+            except (ValueError, TypeError):
+                continue
+        if mindset_numeric:
+            st.plotly_chart(bar_ai_mindset(mindset_numeric), use_container_width=True)
+        else:
+            v_alto = get_val('% participantes con AI Mindset alto')
+            if v_alto is not None:
+                st.metric('% AI Mindset alto', f'{v_alto}%',
+                          delta=f'n={get_n("% participantes con AI Mindset alto")}')
+
+        # === 8. Tool Learning ===
+        st.markdown("#### 8. Tool Learning · Aprendizaje por área")
+        prom_areas = {}
+        pct_areas = {}
+        for area in ['Marketing', 'Impacto', 'Eficiencia', 'Fundraising']:
+            p = get_val(f'Tool Learning {area} - promedio')
+            pa = get_val(f'Tool Learning {area} - % aprendizaje sig.')
+            if p is not None: prom_areas[area] = p
+            if pa is not None: pct_areas[area] = pa
+        col_e, col_f = st.columns(2)
+        with col_e:
+            if prom_areas:
+                st.plotly_chart(bars_tool_learning(prom_areas, pct_areas),
+                                use_container_width=True)
+        with col_f:
+            if pct_areas:
+                st.plotly_chart(bars_tool_learning_pct(pct_areas),
+                                use_container_width=True)
+
+        # === 9. Digital Maturity por dimensión ===
+        st.markdown("#### 9. Digital Maturity · Cambio por dimensión")
+        dim_data = {}
+        for d in ['d1', 'd2', 'd3', 'd4', 'd5', 'd6']:
+            est = parse_dist(get_detalle(f'% orgs mejoraron DM dimensión {d.upper()}'))
+            if est:
+                dim_data[d] = est
+        if dim_data:
+            fig = stacked_digital_maturity(dim_data)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+
+        # === 10. Community Building ===
+        st.markdown("#### 10. Community Building")
+        v_contacto = get_val('% participantes establecieron contacto útil')
+        if v_contacto is not None:
+            n_c = int(get_n('% participantes establecieron contacto útil'))
+            n_si = int(round(v_contacto / 100 * n_c))
+            n_no = n_c - n_si
+            simple_dist = {
+                'Sí, estableció contacto': n_si,
+                'No estableció': n_no,
+            }
+            st.plotly_chart(pie_community_building(simple_dist), use_container_width=True)
+
+        st.caption("ℹ️ Los gráficos usan los datos de la tabla maestra arriba. "
+                   "Si recalculas con otros datos, los gráficos se actualizan automáticamente.")
+
 # ============================================================
 # Footer
 # ============================================================

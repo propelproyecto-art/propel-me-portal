@@ -9,6 +9,7 @@ Referencia: Guía de cálculo de indicadores · Propel · 2025-2026
 import pandas as pd
 import unicodedata
 import re
+from pareo import parear_baseline_endline
 
 
 # ============================================================
@@ -166,11 +167,39 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     else:
         baseline = baseline.copy()
 
+    # Resetear índices para que iloc funcione correctamente con los pareos
+    baseline = baseline.reset_index(drop=True)
+    endline = endline.reset_index(drop=True)
+
     # Normalizar llaves de unión
     baseline['_pname'] = baseline['Por favor, ingresa tu nombre completo'].apply(norm)
     baseline['_org'] = baseline['Selecciona el nombre de tu organización'].apply(norm)
     endline['_pname'] = endline['Escribe tu nombre completo'].apply(norm)
     endline['_org'] = endline['Selecciona el nombre de tu organización'].apply(norm)
+
+    # ============================================================
+    # PAREO ROBUSTO baseline ↔ endline
+    # ============================================================
+    # En vez de hacer merge por nombre exacto (que falla cuando los participantes
+    # escriben su nombre distinto en cada encuesta), usamos un algoritmo en cascada:
+    #   1) email exacto cuando exista
+    #   2) nombre normalizado exacto
+    #   3) nombre similar (≥75%) + misma organización
+    #   4) nombre muy similar (≥85%) sin requerir misma org
+    pareos_df = parear_baseline_endline(
+        baseline, endline,
+        col_email_e='Email' if 'Email' in endline.columns else None,
+    )
+
+    # Construir mapeo idx_baseline → idx_endline para uso en parear()
+    pareo_map = dict(zip(pareos_df['idx_baseline'], pareos_df['idx_endline']))
+
+    # IMPORTANTE: indicadores endline-only se calculan solo sobre personas
+    # PAREADAS con baseline. Esto refleja "participantes validados como parte del
+    # programa" (no respuestas espontáneas de personas no inscritas).
+    # Si una persona solo respondió endline sin baseline, se descarta.
+    idx_endline_pareados = list(pareos_df['idx_endline'])
+    endline_validado = endline.iloc[idx_endline_pareados].copy() if idx_endline_pareados else endline.copy()
 
     # Aplicar mapeos de Digital Maturity
     for df in [baseline, endline]:
@@ -195,16 +224,33 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
         })
 
     def parear(b_col, e_col=None):
+        """
+        Construye un DataFrame con baseline y endline pareados por persona.
+        Usa el pareo robusto pre-calculado (no merge por nombre exacto).
+        """
         if e_col is None:
             e_col = b_col
-        b = baseline[['_pname', '_org', b_col]].rename(columns={b_col: 'baseline'})
-        e = endline[['_pname', e_col]].rename(columns={e_col: 'endline'})
-        return b.merge(e, on='_pname', how='inner').dropna(subset=['baseline', 'endline'])
+        if b_col not in baseline.columns or e_col not in endline.columns:
+            return pd.DataFrame(columns=['_pname', '_org', 'baseline', 'endline'])
+        rows = []
+        for idx_b, idx_e in pareo_map.items():
+            row_b = baseline.iloc[idx_b]
+            row_e = endline.iloc[idx_e]
+            v_b = row_b.get(b_col)
+            v_e = row_e.get(e_col)
+            if pd.notna(v_b) and pd.notna(v_e):
+                rows.append({
+                    '_pname': row_b['_pname'],
+                    '_org': row_b['_org'],
+                    'baseline': v_b,
+                    'endline': v_e,
+                })
+        return pd.DataFrame(rows)
 
     # ---- 1. NPS ----
     nps_col = 'En una escala del 0 al 10, ¿qué tan probable es que recomiendes el Propel Fellowship a otras organizaciones sociales?'
     if nps_col in endline.columns:
-        vals = endline[nps_col].dropna()
+        vals = endline_validado[nps_col].dropna()
         if len(vals):
             n = len(vals)
             promotores = (vals >= 9).sum()
@@ -219,9 +265,49 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
         if len(horas):
             horas['delta'] = horas['baseline'] - horas['endline']
             n = len(horas)
-            add('Promedio horas ahorradas/semana', round(horas['delta'].mean(), 2), n, ' hrs')
+            add('Promedio horas ahorradas/semana (calculado pre-post)', round(horas['delta'].mean(), 2), n, ' hrs',
+                'baseline - endline')
             n_mej = (horas['delta'] > 0).sum()
             add('% participantes mejoraron eficiencia', round(n_mej / n * 100, 2), n, '%', f'{n_mej}/{n}')
+
+    # ---- 2b. Horas ahorradas PROYECTADAS (pregunta directa endline) ----
+    # Esta es la fórmula oficial que Propel usa en sus reportes (replicada de
+    # la tabla dinámica de Melissa). Cálculo por organización:
+    #   - Para cada org, contar las CATEGORÍAS DISTINTAS de respuesta entre
+    #     sus participantes (si dos personas responden lo mismo, cuenta 1;
+    #     si responden distinto, cuenta 1 en cada categoría).
+    #   - Asignar punto medio a cada categoría (1.5, 3.5, 5).
+    #   - Sumar todas las horas y dividir por número de organizaciones únicas.
+    proy_col = '¿Cuánto tiempo crees que podrías ahorrar *semanalmente* usando las herramientas y habilidades aprendidas?'
+    if proy_col in endline.columns:
+        def map_proyeccion(v):
+            if pd.isna(v): return None
+            s = str(v).lower()
+            if 'entre 1 y 2' in s: return 1.5
+            if 'entre 3 y 4' in s: return 3.5
+            if 'mas de 5' in s or 'más de 5' in s: return 5.0
+            return None
+        endline['_h_proy'] = endline[proy_col].apply(map_proyeccion)
+
+        suma_horas = 0.0
+        n_1_2 = n_3_4 = n_5 = 0
+        orgs_con_resp = []
+        for org, grupo in endline.groupby('_org'):
+            cats_unicas = grupo['_h_proy'].dropna().unique()
+            if len(cats_unicas) == 0:
+                continue
+            orgs_con_resp.append(org)
+            for v in cats_unicas:
+                suma_horas += float(v)
+                if v == 1.5: n_1_2 += 1
+                elif v == 3.5: n_3_4 += 1
+                elif v == 5.0: n_5 += 1
+        n_orgs_proy = len(orgs_con_resp)
+        if n_orgs_proy:
+            promedio = suma_horas / n_orgs_proy
+            add('Promedio horas ahorradas/semana (proyección endline)',
+                round(promedio, 2), n_orgs_proy, ' hrs',
+                f'1-2h:{n_1_2}|3-4h:{n_3_4}|5+h:{n_5}')
 
     # ---- 3. Net AI Adoption (pre-post org) ----
     if '_d6' in baseline.columns and '_d6' in endline.columns:
@@ -266,21 +352,27 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     q1 = 'El Fellowship fortaleció significativamente mi *curiosidad y disposición* para probar los usos de la Inteligencia Artificial (IA) en el trabajo'
     q2 = 'El Fellowship me permitió evidenciar que el uso de IA es *clave* para amplificar el impacto del sector social. '
     if q1 in endline.columns and q2 in endline.columns:
-        endline['_mindset'] = (endline[q1].apply(map_likert5) + endline[q2].apply(map_likert5)) / 2
-        vals = endline['_mindset'].dropna()
+        endline_validado['_mindset'] = (endline_validado[q1].apply(map_likert5) + endline_validado[q2].apply(map_likert5)) / 2
+        vals = endline_validado['_mindset'].dropna()
         if len(vals):
             n = len(vals)
             n_alto = (vals >= 4).sum()
-            add('% participantes con AI Mindset alto', round(n_alto / n * 100, 2), n, '%', f'{n_alto}/{n}')
+            # Distribución de puntajes para gráfico
+            dist = vals.value_counts().sort_index().to_dict()
+            detalle = '|'.join(f'{k}:{v}' for k, v in dist.items())
+            add('% participantes con AI Mindset alto', round(n_alto / n * 100, 2), n, '%', detalle)
 
     # ---- 8. Uso diario Google AI ----
     freq_col = '¿Qué tan a menudo has usado esta(s) *herramientas de Google AI *en las últimas 6 semanas?'
     if freq_col in endline.columns:
-        vals = endline[freq_col].dropna()
+        vals = endline_validado[freq_col].dropna()
         if len(vals):
             n = len(vals)
             n_d = (vals == 'Cada día').sum()
-            add('% participantes uso diario Google AI', round(n_d / n * 100, 2), n, '%', f'{n_d}/{n}')
+            # Distribución completa para gráfico
+            dist = vals.value_counts().to_dict()
+            detalle = '|'.join(f'{k}:{v}' for k, v in dist.items())
+            add('% participantes uso diario Google AI', round(n_d / n * 100, 2), n, '%', detalle)
 
     # ---- 9. Tool Learning (4 áreas) ----
     areas = {
@@ -291,7 +383,7 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     }
     for area, col in areas.items():
         if col in endline.columns:
-            vals = endline[col].dropna()
+            vals = endline_validado[col].dropna()
             if len(vals):
                 n = len(vals)
                 avg = vals.mean()
@@ -302,7 +394,7 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     # ---- 10. Confianza en herramientas digitales ----
     conf_col = '¿En qué medida consideras que el Fellowship *aumentó tu confianza* para resolver retos o mejorar prácticas usando herramientas digitales?'
     if conf_col in endline.columns:
-        vals = endline[conf_col].dropna()
+        vals = endline_validado[conf_col].dropna()
         if len(vals):
             n = len(vals)
             n_aum = vals.isin(['Aumentó mucho', 'Aumentó un poco']).sum()
@@ -311,7 +403,7 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     # ---- 11. Nueva herramienta digital ----
     nh_col = '¿Gracias al programa empezaste a usar al menos una nueva herramienta digital para hacer tus tareas más fáciles o rápidas? '
     if nh_col in endline.columns:
-        vals = endline[nh_col].dropna()
+        vals = endline_validado[nh_col].dropna()
         if len(vals):
             n = len(vals)
             n_si = (vals == 1).sum()
@@ -320,7 +412,7 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     # ---- 12. AI Adoption Level percibido (5 niveles) ----
     adopt_col = 'Al concluir el programa, ¿cómo describirías el *nivel de uso* de IA en tu _organización_?'
     if adopt_col in endline.columns:
-        vals = endline[adopt_col].dropna()
+        vals = endline_validado[adopt_col].dropna()
         if len(vals):
             n = len(vals)
 
@@ -340,7 +432,7 @@ def calcular_todos_los_indicadores(baseline, endline, cohorte, programa):
     # ---- 13. Contactos útiles establecidos ----
     cont_col = '¿Gracias al programa estableciste al menos un nuevo *contacto útil *para tu trabajo?'
     if cont_col in endline.columns:
-        vals = endline[cont_col].dropna()
+        vals = endline_validado[cont_col].dropna()
         if len(vals):
             n = len(vals)
             establ = vals.str.contains('Sí', regex=False, na=False).sum()
