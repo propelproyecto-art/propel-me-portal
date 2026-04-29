@@ -35,20 +35,340 @@ from config import COHORTES_DISPONIBLES, PROGRAMAS
 # Configuración de la página
 # ============================================================
 st.set_page_config(
-    page_title="Propel M&E — Indicadores",
+    page_title="Propel M&E — Portal",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# Header
-st.title("📊 Propel M&E — Calculadora de indicadores")
-st.caption("Fase 2 del sistema automatizado de Monitoreo y Evaluación · Beca SER ANDI · Grupo 9")
+# ============================================================
+# CSS institucional Propel — estilos custom inyectados
+# ============================================================
+PROPEL_CSS = """
+<style>
+/* ----- Fuentes ----- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+html, body, [class*="css"], .stMarkdown, .stTextInput, .stSelectbox, p, h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Reducir el padding superior del contenido principal */
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 3rem !important;
+    max-width: 1200px;
+}
+
+/* ----- Header institucional ----- */
+.propel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0 24px 0;
+    border-bottom: 1px solid #e8e8e0;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+.propel-header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+.propel-header-logo {
+    width: 110px;
+    height: auto;
+    flex-shrink: 0;
+}
+.propel-header-divider {
+    width: 1px;
+    height: 36px;
+    background: #d0d0c8;
+}
+.propel-header-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1d4d4d;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+}
+.propel-header-subtitle {
+    font-size: 13px;
+    color: #6b7575;
+    font-weight: 400;
+    margin-top: 2px;
+}
+.propel-header-right {
+    text-align: right;
+    font-size: 12px;
+    color: #6b7575;
+    line-height: 1.5;
+}
+.propel-header-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background: #1d4d4d;
+    color: white;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+/* ----- Sidebar pulida ----- */
+section[data-testid="stSidebar"] {
+    background: #f5f5f0;
+    border-right: 1px solid #e8e8e0;
+}
+section[data-testid="stSidebar"] .block-container {
+    padding-top: 1.5rem !important;
+}
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+    color: #1d4d4d;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+/* Sidebar header con logo pequeño */
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0 20px 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e8e8e0;
+}
+.sidebar-header-logo { width: 28px; height: 28px; flex-shrink: 0; }
+.sidebar-header-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1d4d4d;
+    letter-spacing: -0.01em;
+}
+
+/* ----- Tabs modernas ----- */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    border-bottom: 1px solid #e8e8e0;
+    padding-bottom: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    height: 44px;
+    padding: 0 18px;
+    background: transparent;
+    border-radius: 8px 8px 0 0;
+    font-weight: 500;
+    color: #6b7575;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s ease;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #1d4d4d;
+    background: rgba(29, 77, 77, 0.04);
+}
+.stTabs [aria-selected="true"] {
+    color: #1d4d4d !important;
+    font-weight: 600;
+    border-bottom: 2px solid #1d4d4d !important;
+}
+
+/* ----- Métricas (st.metric) con look más profesional ----- */
+[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid #e8e8e0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    transition: box-shadow 0.15s ease;
+}
+[data-testid="stMetric"]:hover {
+    box-shadow: 0 2px 8px rgba(29, 77, 77, 0.06);
+}
+[data-testid="stMetricLabel"] {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: #6b7575 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+[data-testid="stMetricValue"] {
+    font-size: 28px !important;
+    font-weight: 700 !important;
+    color: #1d4d4d !important;
+    letter-spacing: -0.02em;
+}
+
+/* ----- Botones primarios con verde Propel ----- */
+.stButton > button[kind="primary"],
+.stDownloadButton > button[kind="primary"] {
+    background: #1d4d4d;
+    color: white;
+    border: 1px solid #1d4d4d;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: all 0.15s ease;
+    border-radius: 8px;
+}
+.stButton > button[kind="primary"]:hover,
+.stDownloadButton > button[kind="primary"]:hover {
+    background: #143838;
+    border-color: #143838;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(29, 77, 77, 0.25);
+}
+.stButton > button[kind="primary"]:active {
+    transform: translateY(0);
+}
+
+/* Botones secundarios */
+.stButton > button[kind="secondary"],
+.stDownloadButton > button[kind="secondary"] {
+    background: white;
+    color: #1d4d4d;
+    border: 1px solid #d0d0c8;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+.stButton > button[kind="secondary"]:hover,
+.stDownloadButton > button[kind="secondary"]:hover {
+    border-color: #1d4d4d;
+    background: #f5f5f0;
+}
+
+/* ----- Banners de estado (success/warning/info/error) ----- */
+[data-testid="stAlert"] {
+    border-radius: 10px;
+    border-left-width: 4px !important;
+    padding: 12px 16px;
+}
+
+/* ----- Inputs ----- */
+.stTextInput > div > div > input,
+.stTextArea textarea,
+.stNumberInput input {
+    border-radius: 8px;
+    border: 1px solid #d0d0c8;
+    transition: border 0.15s ease;
+}
+.stTextInput > div > div > input:focus,
+.stTextArea textarea:focus,
+.stNumberInput input:focus {
+    border-color: #1d4d4d;
+    box-shadow: 0 0 0 3px rgba(29, 77, 77, 0.08);
+}
+
+/* ----- Expanders ----- */
+.streamlit-expanderHeader {
+    background: white;
+    border: 1px solid #e8e8e0;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+.streamlit-expanderHeader:hover {
+    border-color: #1d4d4d;
+}
+
+/* ----- Gráficos Plotly con marco elegante ----- */
+[data-testid="stPlotlyChart"] {
+    background: white;
+    border: 1px solid #e8e8e0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    transition: box-shadow 0.2s ease;
+}
+[data-testid="stPlotlyChart"]:hover {
+    box-shadow: 0 4px 12px rgba(29, 77, 77, 0.08);
+    border-color: #d0d0c8;
+}
+
+/* Imágenes con marco también (mapa, etc.) */
+[data-testid="stImage"] img {
+    border-radius: 8px;
+    border: 1px solid #e8e8e0;
+}
+
+/* DataFrames con bordes consistentes */
+[data-testid="stDataFrame"] {
+    border: 1px solid #e8e8e0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* ----- Footer institucional ----- */
+.propel-footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid #e8e8e0;
+    text-align: center;
+    color: #9ba3a3;
+    font-size: 12px;
+    line-height: 1.6;
+}
+.propel-footer strong { color: #1d4d4d; font-weight: 600; }
+
+/* ----- Headings con jerarquía clara ----- */
+h1 { color: #1d4d4d; font-weight: 700; letter-spacing: -0.025em; }
+h2 { color: #1d4d4d; font-weight: 600; letter-spacing: -0.02em; margin-top: 1.5em !important; }
+h3 { color: #1a2e35; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Quitar el "Made with Streamlit" del footer */
+footer { visibility: hidden; }
+#MainMenu { visibility: hidden; }
+</style>
+"""
+
+# Logo Propel SVG embebido (descargado desde Webflow). Vive en el código para
+# no depender de URLs externas y que cargue al instante.
+PROPEL_LOGO_SVG = '''<svg class="propel-header-logo" width="145" height="44" viewBox="0 0 145 44" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M33.3632 8.84209C31.8967 10.4698 30.422 12.0975 28.9474 13.7252C20.0756 23.564 11.2118 33.4028 2.33194 43.2335C2.08214 43.5075 1.78399 43.7895 1.45362 43.9265C0.817036 44.1844 0.124052 43.7331 0.0273568 43.0482C-0.0129331 42.7903 0.00318381 42.5244 0.00318381 42.2585C0.00318381 34.2892 0.00318381 26.3198 0.00318381 18.3505C0.00318381 9.0113 6.91693 1.24341 16.2158 0.131412C26.0063 -1.04505 34.9829 5.80422 36.4897 15.6027C37.8918 24.7163 32.2915 33.427 23.3874 35.9813C22.7509 36.1667 22.074 36.4487 21.526 35.8041C20.9781 35.1675 21.3488 34.5551 21.6389 33.9427C25.4664 25.8686 29.2939 17.7945 33.1215 9.72041C33.2423 9.47061 33.3471 9.20469 33.4599 8.94684C33.4277 8.91461 33.3874 8.87432 33.3552 8.84209" fill="#FD6A44"/><path d="M49.6486 23.9267C51.4697 23.9589 53.2263 24.112 54.9104 23.4029C56.0788 22.9114 56.522 21.9686 56.5704 20.7599C56.6187 19.527 56.2964 18.4634 55.12 17.8993C53.3633 17.0613 51.51 17.1338 49.6486 17.4078V23.9186V23.9267ZM49.5841 28.5519V34.4504C49.5841 36.0942 49.5519 36.1264 47.9322 36.1264C47.1264 36.1264 46.3206 36.1264 45.5068 36.1264C44.8299 36.1264 44.4512 35.8525 44.4512 35.1111C44.4592 28.1974 44.4512 21.2756 44.4512 14.3618C44.4512 13.8139 44.6043 13.3949 45.1925 13.3143C48.9717 12.8389 52.767 12.4763 56.5059 13.4916C61.7114 14.9179 63.7662 21.195 60.4221 25.3771C59.1087 27.0209 57.2392 27.7139 55.265 28.0201C53.4439 28.3021 51.5906 28.3747 49.5761 28.5519" fill="#1D4D4D"/><path d="M103.758 22.4198C103.758 25.4658 103.758 28.2377 103.774 31.0016C103.774 31.195 103.927 31.4609 104.088 31.5656C106.224 33.008 109.1 31.9282 109.721 29.4544C110.067 28.0765 110.067 26.6744 109.68 25.3046C109.229 23.7011 108.23 22.6293 106.522 22.436C105.643 22.3393 104.749 22.4198 103.766 22.4198M103.758 35.5866C103.758 37.3513 103.758 39.0112 103.758 40.6792C103.758 41.9201 103.693 41.9766 102.42 41.9846C101.582 41.9846 100.744 41.9524 99.9061 41.9927C99.1326 42.0249 98.8344 41.7106 98.8425 40.9371C98.8666 38.3424 98.8425 35.7397 98.8425 33.145C98.8425 28.8743 98.8666 24.6035 98.8263 20.3328C98.8183 19.4384 99.1326 19.0435 99.9948 18.8824C102.71 18.3908 105.418 17.9396 108.174 18.4392C111.912 19.1161 114.394 21.7349 114.829 25.5302C115.087 27.8106 114.975 30.0588 113.967 32.1861C112.364 35.5705 108.826 37.0209 104.878 35.9008C104.539 35.8041 104.209 35.7074 103.742 35.5785" fill="#1D4D4D"/><path d="M129.245 25.4496C129.229 23.3868 127.875 22.0975 125.949 22.2023C124.209 22.299 122.847 23.8139 123.041 25.4496H129.245ZM122.912 28.8501C122.944 29.954 123.46 30.6793 124.233 31.2514C125.353 32.0733 126.667 32.2586 127.988 32.17C129.14 32.0975 130.301 31.896 131.437 31.6462C132.146 31.4931 132.468 31.7349 132.589 32.3714C132.702 32.9597 132.767 33.5479 132.863 34.1361C133.057 35.3126 133.016 35.4335 131.904 35.7155C129.269 36.3924 126.61 36.6905 123.927 36.0136C120.543 35.1595 118.391 32.6776 117.94 29.2127C117.505 25.8203 117.996 22.6535 120.639 20.2522C123.282 17.851 126.441 17.5206 129.68 18.8501C132.895 20.1636 133.935 22.9758 134.048 26.1587C134.169 29.4142 134.201 28.8018 131.493 28.834C128.979 28.8662 126.465 28.834 123.959 28.834H122.912V28.8501Z" fill="#1D4D4D"/><path d="M84.0557 30.5745C84.5553 31.7107 85.6189 32.1942 86.8357 32.178C88.1008 32.1619 89.0677 31.5737 89.6076 30.3972C90.5423 28.3666 90.5504 26.2877 89.6882 24.249C89.1886 23.0725 88.2297 22.3957 86.8921 22.3715C85.5303 22.3393 84.4666 22.9033 83.9428 24.1362C83.0242 26.2877 83.0242 28.4472 84.0557 30.5745ZM78.2217 27.4077C78.3748 23.4754 79.6963 20.3892 83.3707 18.834C88.1169 16.8276 94.8936 18.971 95.2804 26.6583C95.4335 29.7284 94.7164 32.5568 92.1942 34.6035C87.1983 38.6486 79.5593 35.78 78.4634 29.4625C78.3345 28.7292 78.3587 28.4391 78.2217 27.4077Z" fill="#1D4D4D"/><path d="M142.299 19.801C142.299 22.8469 142.315 25.8928 142.299 28.9307C142.283 30.4859 142.541 31.7913 144.378 32.178C144.588 32.2264 144.846 32.7824 144.829 33.0805C144.773 33.9105 144.644 34.7485 144.419 35.5463C144.346 35.8122 143.863 36.1909 143.621 36.1506C142.34 35.9492 141.01 35.788 139.817 35.3207C138.246 34.7082 137.642 33.2739 137.497 31.6623C137.424 30.8646 137.424 30.0507 137.424 29.2449C137.424 24.112 137.424 18.9791 137.408 13.8461C137.408 13.1129 137.61 12.5327 138.117 12.0009C138.979 11.0903 139.761 10.0992 140.647 9.22086C140.913 8.95495 141.461 8.76962 141.792 8.85826C142.033 8.92272 142.275 9.50289 142.275 9.85744C142.315 13.1693 142.299 16.4811 142.299 19.7929" fill="#1D4D4D"/><path d="M65.4099 27.5931C65.4099 25.1676 65.4099 22.7422 65.4099 20.3167C65.4099 19.7849 65.5066 19.382 66.0949 19.1966C69.2697 18.1813 72.4768 17.7865 75.7886 18.4714C76.6186 18.6406 76.8603 19.0355 76.6911 19.801C76.5461 20.4537 76.3849 21.0983 76.2882 21.7591C76.1673 22.6455 75.6839 22.7744 74.87 22.6696C73.7419 22.5165 72.5896 22.5246 71.4454 22.4601C70.6315 22.4198 70.3737 22.7744 70.3817 23.6044C70.4301 27.303 70.4059 31.0016 70.3978 34.7083C70.3978 35.9895 70.2608 36.1184 68.9957 36.1264C68.1738 36.1264 67.3519 36.1184 66.5381 36.1264C65.7403 36.1345 65.3938 35.78 65.4099 34.9661C65.4341 32.5084 65.418 30.0507 65.418 27.5931" fill="#1D4D4D"/></svg>'''
+
+st.markdown(PROPEL_CSS, unsafe_allow_html=True)
+
+# ============================================================
+# Header institucional con logo Propel
+# ============================================================
+from datetime import datetime as _dt
+_fecha_hoy = _dt.now().strftime('%d/%m/%Y')
+
+st.markdown(f"""
+<div class="propel-header">
+    <div class="propel-header-left">
+        {PROPEL_LOGO_SVG}
+        <div class="propel-header-divider"></div>
+        <div>
+            <div class="propel-header-title">M&E Portal</div>
+            <div class="propel-header-subtitle">Sistema de Monitoreo y Evaluación</div>
+        </div>
+    </div>
+    <div class="propel-header-right">
+        <span class="propel-header-badge">Beca SER ANDI · Grupo 9</span><br>
+        <span>{_fecha_hoy}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # Sidebar — selección de modo y parámetros
 # ============================================================
 with st.sidebar:
-    st.header("⚙️ Configuración")
+    # Mini-header de la sidebar con logo
+    st.markdown(f"""
+    <div class="sidebar-header">
+        <svg width="28" height="28" viewBox="0 0 37 44" fill="none" xmlns="http://www.w3.org/2000/svg" class="sidebar-header-logo">
+            <path d="M33.3632 8.84209C31.8967 10.4698 30.422 12.0975 28.9474 13.7252C20.0756 23.564 11.2118 33.4028 2.33194 43.2335C2.08214 43.5075 1.78399 43.7895 1.45362 43.9265C0.817036 44.1844 0.124052 43.7331 0.0273568 43.0482C-0.0129331 42.7903 0.00318381 42.5244 0.00318381 42.2585C0.00318381 34.2892 0.00318381 26.3198 0.00318381 18.3505C0.00318381 9.0113 6.91693 1.24341 16.2158 0.131412C26.0063 -1.04505 34.9829 5.80422 36.4897 15.6027C37.8918 24.7163 32.2915 33.427 23.3874 35.9813C22.7509 36.1667 22.074 36.4487 21.526 35.8041C20.9781 35.1675 21.3488 34.5551 21.6389 33.9427C25.4664 25.8686 29.2939 17.7945 33.1215 9.72041C33.2423 9.47061 33.3471 9.20469 33.4599 8.94684C33.4277 8.91461 33.3874 8.87432 33.3552 8.84209" fill="#FD6A44"/>
+        </svg>
+        <span class="sidebar-header-text">Propel M&E</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("##### ⚙️ Configuración")
 
     modo = st.radio(
         "Origen de los datos",
@@ -83,13 +403,24 @@ with st.sidebar:
         help="Si está activo, guarda la tabla maestra en la tabla 'indicators_master'"
     )
 
+    # Footer de sidebar
+    st.markdown("""
+    <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e8e8e0;
+                font-size: 11px; color: #9ba3a3; line-height: 1.5;">
+        <strong style="color: #1d4d4d; font-weight: 600;">Sistema integrado de M&E</strong><br>
+        Fase 1 · n8n recordatorios<br>
+        Fase 2 · Cálculo automático<br>
+        Fase 3 · Asistente IA
+    </div>
+    """, unsafe_allow_html=True)
+
 # ============================================================
 # Pestañas principales
 # ============================================================
 tab_gestion, tab_calculo, tab_reporte = st.tabs([
-    "🎛️ Gestión de cohorte",
-    "🎯 Calcular indicadores",
-    "🤖 Generar reporte (Fase 3)",
+    "🎛️  Gestión de cohorte",
+    "🎯  Calcular indicadores",
+    "🤖  Generar reporte",
 ])
 
 # ============================================================
@@ -1100,3 +1431,12 @@ with st.expander("ℹ️ Sobre esta herramienta"):
 
     **Validación:** los resultados fueron validados contra el cálculo manual de la Cohorte 8 (Fellowship).
     """)
+
+# Footer institucional al pie de página
+st.markdown("""
+<div class="propel-footer">
+    <strong>Sistema integrado de Monitoreo y Evaluación · Propel</strong><br>
+    Beca SER ANDI · Grupo 9 · 2026<br>
+    <span style="font-size: 11px;">Fase 1 (n8n) · Fase 2 (Streamlit + Supabase) · Fase 3 (OpenAI + Google Docs)</span>
+</div>
+""", unsafe_allow_html=True)
