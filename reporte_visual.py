@@ -178,6 +178,45 @@ def _formato_alcance(num):
     return f'+{num//1000}K' if num >= 1000 else str(num)
 
 
+def _cargar_orgs(orgs_lista):
+    """
+    Carga datos sociodemográficos de las organizaciones.
+
+    Estrategia:
+      1. Intenta primero la tabla 'organizations' en Supabase.
+      2. Si falla (sin conexión, tabla vacía, error), cae al fallback
+         de datos_sinteticos.py.
+
+    Si parte de las orgs están en Supabase y otras no, las que no estén
+    devuelven los datos de datos_sinteticos.py (si existen ahí) o
+    placeholders '(no disponible)'.
+    """
+    # Intentar Supabase
+    try:
+        from data_sources import cargar_orgs_supabase
+        orgs_supabase = cargar_orgs_supabase(orgs_lista)
+        # Verificar que al menos una org tenga país real
+        tiene_datos = any(d['pais'] != '(no disponible)'
+                          for d in orgs_supabase.values())
+        if tiene_datos:
+            # Para las orgs que vinieron en blanco de Supabase, intentar
+            # complementar con datos sintéticos (caso transitorio: org en
+            # cohorte pero todavía no migrada a la tabla)
+            orgs_sinteticos = enriquecer_orgs(orgs_lista)
+            for nombre, datos in orgs_supabase.items():
+                if datos['pais'] == '(no disponible)' and \
+                        orgs_sinteticos.get(nombre, {}).get('pais') != '(no disponible)':
+                    orgs_supabase[nombre] = orgs_sinteticos[nombre]
+            return orgs_supabase
+        else:
+            print("[orgs] Supabase devolvió todo vacío, usando fallback sintético")
+    except Exception as e:
+        print(f"[orgs] No se pudo cargar de Supabase ({e}), usando fallback sintético")
+
+    # Fallback completo a datos sintéticos
+    return enriquecer_orgs(orgs_lista)
+
+
 # ============================================================
 # GENERACIÓN DEL HTML CON PLOTLY (interactivo, perfecto)
 # ============================================================
@@ -207,7 +246,7 @@ def generar_html_reporte(tabla_maestra, cohorte='C8', programa='Fellowship',
     if orgs_lista is None:
         from datos_sinteticos import ORGS_C8
         orgs_lista = list(ORGS_C8.keys())
-    orgs_enriq = enriquecer_orgs(orgs_lista)
+    orgs_enriq = _cargar_orgs(orgs_lista)
     meta = agregar_metadata(orgs_enriq)
 
     n_part = _get_n(tabla_maestra, 'NPS', 33)
@@ -965,7 +1004,7 @@ def generar_imagenes_para_docs(tabla_maestra, programa='Fellowship', orgs_lista=
     if orgs_lista is None:
         from datos_sinteticos import ORGS_C8
         orgs_lista = list(ORGS_C8.keys())
-    orgs_enriq = enriquecer_orgs(orgs_lista)
+    orgs_enriq = _cargar_orgs(orgs_lista)
     meta = agregar_metadata(orgs_enriq)
 
     # Mapa: intentar primero choropleth Plotly (mapas reales). Si falla

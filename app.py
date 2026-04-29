@@ -370,6 +370,19 @@ with tab_calculo:
                         programa=programa
                     )
                     st.session_state['tabla_maestra'] = tabla_maestra
+
+                    # Guardar lista de orgs reales de esta cohorte para
+                    # enriquecer el reporte con datos sociodemográficos.
+                    # Preferimos endline (más reciente); si está vacío, usamos baseline.
+                    orgs_lista = []
+                    col_org = 'Selecciona el nombre de tu organización'
+                    for df in [endline, baseline]:
+                        if df is not None and col_org in df.columns:
+                            orgs_lista = df[col_org].dropna().unique().tolist()
+                            if orgs_lista:
+                                break
+                    st.session_state['orgs_lista'] = orgs_lista
+
                     st.success(f"✅ {len(tabla_maestra)} indicadores calculados")
 
                     if guardar_supabase:
@@ -660,9 +673,9 @@ with tab_reporte:
             if GOOGLE_SERVICE_ACCOUNT_JSON:
                 st.success("✅ Google Docs configurado")
             else:
-                st.info(
-                    "📑 Google Doc disponible al activar cuenta Workspace de Propel",
-                    icon="🏢"
+                st.warning(
+                    "⚠️ Google Docs no configurado — podrás descargar Word/Markdown",
+                    icon="⚠️"
                 )
 
         st.divider()
@@ -974,22 +987,11 @@ with tab_reporte:
             # Botones de descarga / exportación
             st.divider()
             st.markdown("### ⬇️ Exportar reporte")
-            if GOOGLE_SERVICE_ACCOUNT_JSON:
-                st.caption(
-                    "Dos opciones: **HTML visual** (estilo plantilla institucional, "
-                    "para mandar al donante) o **Google Doc** (editable "
-                    "colaborativamente). Si necesitas PDF, exporta desde Google Doc "
-                    "(Archivo → Descargar → PDF) o desde el navegador (Imprimir → "
-                    "Guardar como PDF)."
-                )
-            else:
-                st.caption(
-                    "El **HTML visual** sigue la plantilla institucional de Propel y es "
-                    "el formato recomendado para enviar al donante. Si necesitas PDF, "
-                    "abre el HTML en el navegador y usa *Imprimir → Guardar como PDF*. "
-                    "La opción de **Google Doc** (edición colaborativa) se activará cuando "
-                    "se configure la cuenta Workspace institucional de Propel."
-                )
+            st.caption(
+                "Dos opciones: **HTML visual** (estilo plantilla institucional, "
+                "para mandar al donante) o **Google Docs** (editable colaborativamente). "
+                "Si necesitas PDF, exporta desde Google Docs (Archivo → Descargar → PDF)."
+            )
 
             from reporte_visual import generar_html_reporte
             import tempfile, os
@@ -1024,6 +1026,7 @@ with tab_reporte:
                                     reporte,
                                     tabla_maestra=tabla_actual,
                                     programa=programa_actual,
+                                    orgs_lista=st.session_state.get('orgs_lista'),
                                 )
                             st.success("✅ Google Doc creado y compartido públicamente "
                                        "(cualquiera con el link puede editar)")
@@ -1039,9 +1042,8 @@ with tab_reporte:
                         "📑 Crear Google Doc editable",
                         use_container_width=True,
                         disabled=True,
-                        help="Esta función se activará cuando se configure la cuenta "
-                             "Workspace institucional de Propel. Por ahora, descarga "
-                             "el HTML visual a la izquierda."
+                        help="Requiere configurar GOOGLE_SERVICE_ACCOUNT_JSON en "
+                             "Streamlit secrets. Mientras tanto, descarga el HTML."
                     )
 
             # Opciones avanzadas (Word/Markdown) en un expander oculto por defecto

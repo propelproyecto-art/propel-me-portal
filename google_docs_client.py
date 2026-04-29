@@ -346,10 +346,18 @@ def _build_requests_reporte(reporte, urls_imagenes, datos_socio):
 
 
 def create_google_doc(reporte, tabla_maestra=None, programa='Fellowship',
-                       email_para_compartir=None):
+                       email_para_compartir=None, orgs_lista=None):
     """
     Crea un Google Doc con layout profesional + colores Propel + todos los
     gráficos clave de la cohorte.
+
+    Args:
+        reporte: dict con la estructura del reporte.
+        tabla_maestra: DataFrame con los indicadores calculados.
+        programa: 'Fellowship' o 'Impact Accelerator'.
+        email_para_compartir: si se da, comparte el doc con ese email.
+        orgs_lista: lista de nombres de organizaciones de la cohorte. Si no
+            se pasa, usa el default de datos_sinteticos (las 23 orgs de C8).
     """
     docs_service, drive_service = _get_services()
 
@@ -359,7 +367,9 @@ def create_google_doc(reporte, tabla_maestra=None, programa='Fellowship',
     if tabla_maestra is not None:
         try:
             from reporte_visual import generar_imagenes_para_docs
-            imgs = generar_imagenes_para_docs(tabla_maestra, programa=programa)
+            imgs = generar_imagenes_para_docs(
+                tabla_maestra, programa=programa, orgs_lista=orgs_lista
+            )
             datos_socio = imgs.get('meta', {})
 
             # 2. Subir cada PNG al Shared Drive

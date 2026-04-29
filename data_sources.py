@@ -230,3 +230,58 @@ def guardar_resultados_supabase(tabla_maestra):
     registros = registros.to_dict(orient='records')
 
     sb.table('indicators_master').insert(registros).execute()
+
+
+def cargar_orgs_supabase(lista_nombres):
+    """
+    Carga datos sociodemográficos (país, ciudad, causa, alcance) de la tabla
+    'organizations' en Supabase para las orgs especificadas.
+
+    Devuelve un dict {nombre_org: {'pais', 'ciudad', 'causa', 'alcance'}}.
+    Las orgs que no estén en la BD reciben placeholders '(no disponible)'.
+
+    Args:
+        lista_nombres: lista de nombres de organizaciones (strings)
+
+    Returns:
+        dict con las orgs enriquecidas. Si Supabase no está configurado o falla
+        la conexión, lanza una excepción que el caller puede capturar para usar
+        el fallback de datos_sinteticos.
+    """
+    try:
+        from supabase import create_client
+    except ImportError:
+        raise RuntimeError("Falta supabase. Instala con: pip install supabase")
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Falta configurar SUPABASE_URL y SUPABASE_KEY")
+
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    # Una sola consulta con IN para todas las orgs
+    resp = sb.table('organizations') \
+             .select('nombre,pais,ciudad,causa,alcance_anual') \
+             .in_('nombre', lista_nombres) \
+             .execute()
+
+    # Indexar por nombre
+    por_nombre = {row['nombre']: row for row in resp.data}
+
+    resultado = {}
+    for nombre in lista_nombres:
+        if nombre in por_nombre:
+            r = por_nombre[nombre]
+            resultado[nombre] = {
+                'pais': r.get('pais') or '(no disponible)',
+                'ciudad': r.get('ciudad') or '(no disponible)',
+                'causa': r.get('causa') or 'Otros',
+                'alcance': r.get('alcance_anual') or 0,
+            }
+        else:
+            resultado[nombre] = {
+                'pais': '(no disponible)',
+                'ciudad': '(no disponible)',
+                'causa': 'Otros',
+                'alcance': 0,
+            }
+    return resultado
