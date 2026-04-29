@@ -1,0 +1,26 @@
+# Tema institucional Propel
+# Aplica a botones, sliders, radio buttons, checkboxes, etc.
+
+[theme]
+# Color primario: verde institucional Propel (de los reportes)
+primaryColor = "#1d4d4d"
+
+# Fondo principal: blanco limpio
+backgroundColor = "#FFFFFF"
+
+# Fondo secundario (sidebar y bloques de código): beige claro Propel
+secondaryBackgroundColor = "#f5f5f0"
+
+# Color del texto principal: gris oscuro elegante
+textColor = "#1a2e35"
+
+# Tipografía: sans-serif moderna del sistema
+font = "sans serif"
+
+[client]
+# Quitar el menú "Made with Streamlit" en producción para look más profesional
+toolbarMode = "minimal"
+showErrorDetails = true
+
+[server]
+# No cambiar nada, solo lo que ya estaba
