@@ -86,9 +86,10 @@ with st.sidebar:
 # ============================================================
 # Pestañas principales
 # ============================================================
-tab_gestion, tab_calculo = st.tabs([
+tab_gestion, tab_calculo, tab_reporte = st.tabs([
     "🎛️ Gestión de cohorte",
     "🎯 Calcular indicadores",
+    "🤖 Generar reporte (Fase 3)",
 ])
 
 # ============================================================
@@ -628,6 +629,450 @@ with tab_calculo:
 
         st.caption("ℹ️ Los gráficos usan los datos de la tabla maestra arriba. "
                    "Si recalculas con otros datos, los gráficos se actualizan automáticamente.")
+
+# ============================================================
+# Pestaña 3 — Generar reporte con IA (Fase 3)
+# ============================================================
+with tab_reporte:
+    st.subheader("🤖 Generar borrador de reporte con IA")
+    st.caption(
+        "Esta pestaña usa OpenAI para interpretar los indicadores calculados y "
+        "genera un borrador editable de reporte en español, listo para revisar "
+        "y mandar a donantes."
+    )
+
+    if 'tabla_maestra' not in st.session_state:
+        st.info(
+            "👈 Primero calcula los indicadores en la pestaña **🎯 Calcular indicadores**. "
+            "Una vez que tengas la tabla maestra, vuelve acá para generar el reporte."
+        )
+    else:
+        from config import OPENAI_API_KEY, GOOGLE_SERVICE_ACCOUNT_JSON
+
+        # Estado de credenciales
+        col_status1, col_status2 = st.columns(2)
+        with col_status1:
+            if OPENAI_API_KEY:
+                st.success("✅ OpenAI configurado")
+            else:
+                st.error("❌ OpenAI no configurado — agrega `OPENAI_API_KEY` a secrets")
+        with col_status2:
+            if GOOGLE_SERVICE_ACCOUNT_JSON:
+                st.success("✅ Google Docs configurado")
+            else:
+                st.info(
+                    "📑 Google Doc disponible al activar cuenta Workspace de Propel",
+                    icon="🏢"
+                )
+
+        st.divider()
+
+        tabla_actual = st.session_state['tabla_maestra']
+        cohorte_actual = tabla_actual['cohorte'].iloc[0] if not tabla_actual.empty else cohorte
+        programa_actual = tabla_actual['programa'].iloc[0] if not tabla_actual.empty else 'Fellowship'
+
+        st.markdown(f"**Cohorte cargada:** {cohorte_actual} · "
+                    f"**Programa:** {programa_actual} · "
+                    f"**Indicadores:** {len(tabla_actual)}")
+
+        # Botón generar
+        col_gen, _ = st.columns([1, 2])
+        with col_gen:
+            generar = st.button(
+                "✨ Generar borrador",
+                type="primary",
+                use_container_width=True,
+                disabled=not OPENAI_API_KEY,
+            )
+
+        if generar:
+            from reportes import (
+                generar_todos_los_insights, generar_resumen_ejecutivo,
+                ensamblar_reporte
+            )
+
+            progress_bar = st.progress(0, text="Generando insights...")
+            status_text = st.empty()
+
+            def update_progress(completados, total, indicador):
+                progress_bar.progress(
+                    completados / total,
+                    text=f"Generando insights... {completados}/{total} — último: {indicador[:50]}"
+                )
+
+            try:
+                insights, errores = generar_todos_los_insights(
+                    tabla_actual, cohorte_actual, programa_actual,
+                    progress_callback=update_progress
+                )
+
+                progress_bar.progress(1.0, text="Generando resumen ejecutivo...")
+                resumen = generar_resumen_ejecutivo(
+                    tabla_actual, cohorte_actual, programa_actual
+                )
+
+                reporte = ensamblar_reporte(
+                    tabla_actual, insights, resumen,
+                    cohorte_actual, programa_actual
+                )
+                st.session_state['reporte_generado'] = reporte
+                st.session_state['reporte_errores'] = errores
+                progress_bar.empty()
+                status_text.empty()
+                st.success(f"✅ Reporte generado · {len(insights)} insights")
+                if errores:
+                    st.warning(f"⚠️ {len(errores)} indicadores fallaron en la generación")
+                    with st.expander("Ver errores"):
+                        for ind, err in errores.items():
+                            st.code(f"{ind}\n{err}")
+            except Exception as e:
+                progress_bar.empty()
+                st.error(f"Error generando reporte: {e}")
+
+        # Mostrar reporte generado
+        if 'reporte_generado' in st.session_state:
+            reporte = st.session_state['reporte_generado']
+            st.divider()
+
+            # Resumen ejecutivo (editable)
+            st.markdown("### 📄 Resumen ejecutivo")
+            resumen_editado = st.text_area(
+                "Edita el resumen si quieres",
+                value=reporte['resumen_ejecutivo'],
+                height=200,
+                label_visibility='collapsed',
+            )
+            reporte['resumen_ejecutivo'] = resumen_editado
+
+            # Insights por sección (con previsualización)
+            st.markdown("### 📊 Insights por indicador")
+            for seccion in reporte['secciones']:
+                with st.expander(f"**{seccion['titulo']}** "
+                                 f"({len([c for c in seccion['contenido'] if c['tipo']=='indicador'])} indicadores)"):
+                    for item in seccion['contenido']:
+                        if item['tipo'] == 'indicador':
+                            st.markdown(f"**{item['nombre']}** · "
+                                        f"{item['valor']}{item['unidad']} (n={item['n']})")
+                            insight_editado = st.text_area(
+                                f"Insight para {item['nombre']}",
+                                value=item['insight'],
+                                key=f"insight_{item['nombre']}",
+                                height=100,
+                                label_visibility='collapsed',
+                            )
+                            item['insight'] = insight_editado
+                            st.markdown("---")
+                        elif item['tipo'] == 'metadata':
+                            for k, v in item['datos'].items():
+                                st.markdown(f"- **{k}:** {v}")
+
+            # ============================================================
+            # CAPA 2: EDICIÓN DE CONTENIDO DEL REPORTE VISUAL
+            # ============================================================
+            st.divider()
+            st.markdown("### 🎨 Personalizar contenido del reporte visual")
+            st.caption(
+                "Edita los textos del reporte HTML que se mandará al donante. "
+                "La estructura visual (logo, colores, layout) está fija como plantilla "
+                "institucional. Aquí editas solo el contenido que cambia entre cohortes."
+            )
+
+            from reporte_visual import obtener_contenido_default
+
+            # Inicializar contenido del reporte en session_state
+            if 'reporte_contenido' not in st.session_state:
+                st.session_state['reporte_contenido'] = obtener_contenido_default()
+
+            cont = st.session_state['reporte_contenido']
+
+            # ---- Header ----
+            with st.expander("✏️ Header — Tagline del reporte", expanded=False):
+                col_h1, col_h2 = st.columns(2)
+                with col_h1:
+                    cont['tagline_pre'] = st.text_input(
+                        "Texto previo (color blanco)",
+                        value=cont.get('tagline_pre', 'Accelerating impact with'),
+                    )
+                with col_h2:
+                    cont['tagline_post'] = st.text_input(
+                        "Texto destacado (color amarillo)",
+                        value=cont.get('tagline_post', 'the power of AI.'),
+                    )
+
+            # ---- Lead inicial ----
+            with st.expander("✏️ Texto introductorio (lead)", expanded=False):
+                cont['lead_inicial'] = st.text_area(
+                    "Lead inicial (puedes usar {n_part} para insertar el número de participantes)",
+                    value=cont.get('lead_inicial', ''),
+                    height=100,
+                )
+                cont['cohort_glance_lead'] = st.text_area(
+                    "Subtítulo de 'Cohort X at a glance' "
+                    "(usa {num_causas}, {num_paises}, {num_orgs})",
+                    value=cont.get('cohort_glance_lead', ''),
+                    height=80,
+                )
+
+            # ---- What we accomplished together ----
+            with st.expander("✏️ 'What we accomplished together' (sección de logros)", expanded=False):
+                cont['accomplish_titulo'] = st.text_input(
+                    "Título de la sección",
+                    value=cont.get('accomplish_titulo', ''),
+                )
+                cont['accomplish_intro'] = st.text_area(
+                    "Texto introductorio",
+                    value=cont.get('accomplish_intro', ''),
+                    height=80,
+                )
+                cont['accomplish_outro'] = st.text_area(
+                    "Texto de cierre",
+                    value=cont.get('accomplish_outro', ''),
+                    height=80,
+                )
+
+                # Uploader de imagen de cohorte
+                st.markdown("**📷 Imagen de cohorte** (foto grupal o representativa)")
+                if cont.get('accomplish_imagen_base64'):
+                    col_ai1, col_ai2 = st.columns([3, 1])
+                    with col_ai1:
+                        st.image(cont['accomplish_imagen_base64'], width=240)
+                    with col_ai2:
+                        if st.button("🗑️ Quitar",
+                                      key='rm_accomplish_img',
+                                      use_container_width=True):
+                            cont['accomplish_imagen_base64'] = None
+                            st.rerun()
+                else:
+                    uploaded_acc = st.file_uploader(
+                        "Subir imagen (JPG/PNG)",
+                        type=['png', 'jpg', 'jpeg'],
+                        key='accomplish_img',
+                        label_visibility='collapsed',
+                    )
+                    if uploaded_acc is not None:
+                        from reporte_visual import imagen_a_data_uri
+                        file_bytes = uploaded_acc.read()
+                        cont['accomplish_imagen_base64'] = imagen_a_data_uri(file_bytes)
+                        st.rerun()
+
+            # ---- Closing bar (con NPS, ratings) ----
+            with st.expander("✏️ Barra de cierre (con NPS y ratings)", expanded=False):
+                cont['closing_text'] = st.text_area(
+                    "Texto descriptivo (usa {programa})",
+                    value=cont.get('closing_text', ''),
+                    height=80,
+                )
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    cont['closing_session_rating'] = st.text_input(
+                        "Average session rating",
+                        value=cont.get('closing_session_rating', '4.7'),
+                    )
+                with col_c2:
+                    cont['closing_live_hours'] = st.text_input(
+                        "Live sessions delivered",
+                        value=cont.get('closing_live_hours', '+21h'),
+                    )
+
+            # ---- Heroes destacados ----
+            with st.expander("✏️ Meet the heroes — 3 organizaciones destacadas", expanded=False):
+                st.caption(
+                    "Edita los datos de los 3 héroes. La org puede ser cualquier "
+                    "texto (no necesariamente debe estar en la lista de orgs)."
+                )
+
+                # Asegurar que tenemos 3 heroes
+                while len(cont.get('heroes', [])) < 3:
+                    cont.setdefault('heroes', []).append({
+                        'nombre': '', 'descripcion': '', 'plan_digital': '',
+                        'progreso': '', 'quote': '', 'autor': '',
+                    })
+
+                tabs_h = st.tabs([f"Hero {i+1}" for i in range(3)])
+                for i, tab in enumerate(tabs_h):
+                    with tab:
+                        h = cont['heroes'][i]
+                        h['nombre'] = st.text_input(
+                            "Nombre de la organización",
+                            value=h.get('nombre', ''),
+                            key=f'hero_nombre_{i}',
+                        )
+                        h['descripcion'] = st.text_area(
+                            "Descripción de la organización",
+                            value=h.get('descripcion', ''),
+                            height=60,
+                            key=f'hero_desc_{i}',
+                        )
+                        h['plan_digital'] = st.text_area(
+                            "Plan digital / lo que están haciendo",
+                            value=h.get('plan_digital', ''),
+                            height=80,
+                            key=f'hero_plan_{i}',
+                        )
+                        h['progreso'] = st.text_area(
+                            "Progreso (lo que han logrado)",
+                            value=h.get('progreso', ''),
+                            height=80,
+                            key=f'hero_prog_{i}',
+                        )
+                        h['quote'] = st.text_area(
+                            "Quote / testimonio",
+                            value=h.get('quote', ''),
+                            height=80,
+                            key=f'hero_quote_{i}',
+                        )
+                        h['autor'] = st.text_input(
+                            "Autor del quote (Nombre, País)",
+                            value=h.get('autor', ''),
+                            key=f'hero_autor_{i}',
+                        )
+
+                        # Uploader de imagen del hero
+                        st.markdown("**📷 Foto del hero**")
+                        if h.get('imagen_base64'):
+                            col_img1, col_img2 = st.columns([3, 1])
+                            with col_img1:
+                                st.image(h['imagen_base64'], width=200)
+                            with col_img2:
+                                if st.button("🗑️ Quitar",
+                                              key=f'rm_hero_img_{i}',
+                                              use_container_width=True):
+                                    h['imagen_base64'] = None
+                                    st.rerun()
+                        else:
+                            uploaded_img = st.file_uploader(
+                                "Subir foto (JPG/PNG)",
+                                type=['png', 'jpg', 'jpeg'],
+                                key=f'hero_img_{i}',
+                                label_visibility='collapsed',
+                            )
+                            if uploaded_img is not None:
+                                from reporte_visual import imagen_a_data_uri
+                                file_bytes = uploaded_img.read()
+                                h['imagen_base64'] = imagen_a_data_uri(file_bytes)
+                                st.rerun()
+
+            # ---- Footer ----
+            with st.expander("✏️ Footer del reporte", expanded=False):
+                cont['footer_quote'] = st.text_input(
+                    "Quote del footer (color destacado)",
+                    value=cont.get('footer_quote', ''),
+                )
+                cont['footer_subtext'] = st.text_input(
+                    "Subtexto del footer (color blanco)",
+                    value=cont.get('footer_subtext', ''),
+                )
+
+            # Botón para resetear a defaults
+            if st.button("🔄 Restaurar valores por defecto", help="Vuelve al contenido original"):
+                st.session_state['reporte_contenido'] = obtener_contenido_default()
+                st.rerun()
+
+            # Guardar el contenido editado en session_state
+            st.session_state['reporte_contenido'] = cont
+
+            # Botones de descarga / exportación
+            st.divider()
+            st.markdown("### ⬇️ Exportar reporte")
+            if GOOGLE_SERVICE_ACCOUNT_JSON:
+                st.caption(
+                    "Dos opciones: **HTML visual** (estilo plantilla institucional, "
+                    "para mandar al donante) o **Google Doc** (editable "
+                    "colaborativamente). Si necesitas PDF, exporta desde Google Doc "
+                    "(Archivo → Descargar → PDF) o desde el navegador (Imprimir → "
+                    "Guardar como PDF)."
+                )
+            else:
+                st.caption(
+                    "El **HTML visual** sigue la plantilla institucional de Propel y es "
+                    "el formato recomendado para enviar al donante. Si necesitas PDF, "
+                    "abre el HTML en el navegador y usa *Imprimir → Guardar como PDF*. "
+                    "La opción de **Google Doc** (edición colaborativa) se activará cuando "
+                    "se configure la cuenta Workspace institucional de Propel."
+                )
+
+            from reporte_visual import generar_html_reporte
+            import tempfile, os
+
+            col_html, col_gdoc = st.columns(2)
+
+            with col_html:
+                html_visual = generar_html_reporte(
+                    tabla_actual, cohorte=cohorte_actual, programa=programa_actual,
+                    contenido=st.session_state['reporte_contenido'],
+                )
+                st.download_button(
+                    "🌐 Descargar HTML visual",
+                    html_visual.encode('utf-8'),
+                    f"propel_{cohorte_actual}_reporte_{datetime.now().strftime('%Y%m%d')}.html",
+                    "text/html",
+                    use_container_width=True,
+                    type="primary",
+                    help="HTML auto-contenido con gráficos interactivos (mapa + pie chart). "
+                         "Se abre en cualquier navegador."
+                )
+
+            with col_gdoc:
+                if GOOGLE_SERVICE_ACCOUNT_JSON:
+                    if st.button("📑 Crear Google Doc editable",
+                                  use_container_width=True, type="primary"):
+                        from google_docs_client import create_google_doc
+                        try:
+                            with st.spinner("Creando Google Doc (esto puede "
+                                             "tardar 30-60 segundos)..."):
+                                resultado = create_google_doc(
+                                    reporte,
+                                    tabla_maestra=tabla_actual,
+                                    programa=programa_actual,
+                                )
+                            st.success("✅ Google Doc creado y compartido públicamente "
+                                       "(cualquiera con el link puede editar)")
+                            st.link_button(
+                                "Abrir Google Doc",
+                                resultado['url'],
+                                use_container_width=True,
+                            )
+                        except Exception as e:
+                            st.error(f"Error creando Google Doc: {e}")
+                else:
+                    st.button(
+                        "📑 Crear Google Doc editable",
+                        use_container_width=True,
+                        disabled=True,
+                        help="Esta función se activará cuando se configure la cuenta "
+                             "Workspace institucional de Propel. Por ahora, descarga "
+                             "el HTML visual a la izquierda."
+                    )
+
+            # Opciones avanzadas (Word/Markdown) en un expander oculto por defecto
+            with st.expander("Opciones avanzadas (Word, Markdown)"):
+                st.caption(
+                    "Estos formatos son texto puro sin gráficos. Útiles si quieres "
+                    "trabajar el contenido fuera del portal antes de pasarlo a HTML/Docs."
+                )
+                from reportes import reporte_a_markdown, reporte_a_docx
+                col_md, col_docx = st.columns(2)
+                with col_md:
+                    md_content = reporte_a_markdown(reporte)
+                    st.download_button(
+                        "📝 Markdown",
+                        md_content.encode('utf-8'),
+                        f"reporte_{cohorte_actual}_{datetime.now().strftime('%Y%m%d')}.md",
+                        "text/markdown",
+                        use_container_width=True,
+                    )
+                with col_docx:
+                    tmp_path = os.path.join(tempfile.gettempdir(),
+                                             f"reporte_{cohorte_actual}.docx")
+                    reporte_a_docx(reporte, tmp_path)
+                    with open(tmp_path, 'rb') as f:
+                        st.download_button(
+                            "📄 Word",
+                            f.read(),
+                            f"reporte_{cohorte_actual}_{datetime.now().strftime('%Y%m%d')}.docx",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                        )
 
 # ============================================================
 # Footer

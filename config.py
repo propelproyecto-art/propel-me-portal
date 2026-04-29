@@ -31,6 +31,26 @@ except Exception:
 
 
 # ============================================================
+# OpenAI (Fase 3 — generación de insights y reportes)
+# Si no está configurado, la pestaña de reportes mostrará un mensaje claro
+# y las demás funcionalidades del portal seguirán funcionando.
+# ============================================================
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
+
+
+# ============================================================
+# Google Docs (Fase 3 — exportar a Google Doc)
+# Opcional: si no está configurado, el usuario podrá descargar Word/Markdown.
+# ============================================================
+GOOGLE_SERVICE_ACCOUNT_JSON = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", None)
+GOOGLE_DOC_DEFAULT_SHARE = st.secrets.get("GOOGLE_DOC_DEFAULT_SHARE", None)
+# ID de la carpeta de Drive (compartida con el service account) donde se
+# crean los Google Docs generados. Si no se define, los docs se crean en el
+# "My Drive" del service account (puede fallar con 403 en muchas cuentas).
+GOOGLE_DRIVE_FOLDER_ID = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID", None)
+
+
+# ============================================================
 # Programas y cohortes
 # ============================================================
 PROGRAMAS = ['Fellowship', 'Impact Accelerator']
